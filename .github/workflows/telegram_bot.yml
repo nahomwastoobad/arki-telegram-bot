@@ -1,0 +1,39 @@
+name: Post Ethiopia News to Telegram
+
+on:
+  schedule:
+    # Runs every 5 minutes (GitHub's minimum interval)
+    - cron: '*/5 * * * *'
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+jobs:
+  post-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4  # Kill if it hangs (prevents overlapping runs)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Telegram Bot
+        env:
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_API_URL:    ${{ secrets.TELEGRAM_API_URL }}
+          GROQ_API_KEY:        ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY:      ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY:  ${{ secrets.OPENROUTER_API_KEY }}
+          HF_TOKEN:            ${{ secrets.HF_TOKEN }}
+          CLICKHOUSE_HOST:     ${{ secrets.CLICKHOUSE_HOST }}
+          CLICKHOUSE_USER:     ${{ secrets.CLICKHOUSE_USER }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+        run: python bot.py
