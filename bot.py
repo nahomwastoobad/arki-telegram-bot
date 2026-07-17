@@ -168,11 +168,11 @@ def pick_next_article(client):
             )
         """
         rows = client.query(f"""
-            SELECT sr.title, sr.url, nt.topic, sr.sentiment_score_normalized, nt.translated_text, nt.processed_at
+            SELECT sr.title, sr.url, nt.topic, sr.sentiment_score_normalized, sr.processed_at
             FROM sentiment_results sr
             JOIN news_topics nt ON sr.doc_id = nt.doc_id
             {where_clause}
-            ORDER BY nt.processed_at DESC
+            ORDER BY sr.processed_at DESC
             LIMIT {limit}
         """).result_rows
         
@@ -185,9 +185,9 @@ def pick_next_article(client):
                 "title": r[0], "url": url,
                 "raw_topic": r[2] or "Politics",
                 "sentiment_score": float(r[3] or 0),
-                "text": r[4] or r[0],
+                "text": r[0],
                 "image_url": None,
-                "date": r[5]
+                "date": r[4]
             })
     except Exception as e:
         logger.warning(f"Scraper pick failed: {e}")
