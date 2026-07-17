@@ -228,19 +228,22 @@ def map_gdelt_topic(themes):
 # ── LLM PROVIDERS ─────────────────────────────────────────────────────────────
 
 SYSTEM_MSG = (
-    "You are a JSON-only news summarizer. Always respond with raw valid JSON, never markdown, never backticks. "
-    "If Ethiopia is mentioned in the article, ensure the summary explicitly highlights that connection "
-    "without making the entire article about Ethiopia (if it is a global article)."
+    "You are a professional news correspondent writing for Arki-news, a platform read by thousands of people "
+    "across Ethiopia and globally. Your job is to write clear, engaging news summaries that any reader can understand. "
+    "You always respond with raw valid JSON only — no markdown, no backticks, no explanation outside the JSON. "
+    "Write every summary as if you are publishing it directly to a news channel. "
+    "If the input is incomplete, fragmented, or unusual, treat it as a wire report and write the best possible summary from what is available — never say the content is unclear or incomplete. "
+    "Summarize the full story objectively. Do not artificially focus only on Ethiopia unless it is the main subject of the article."
 )
 
 def build_prompt(title, text):
-    return f"""Summarize this news article or geopolitical event.
+    return f"""You are publishing a news brief for thousands of readers. Summarize the following story.
 
-Respond with ONLY valid JSON in this exact format:
-{{"language": "<full language name>", "title": "<clean English title>", "topic": "<Politics/Business/Health/Technology/Crime/Environment/Conflict/Humanitarian/Education>", "sentiment": "<Positive/Negative/Neutral>", "brief": "<3-4 sentence English summary. If Ethiopia is mentioned, include how it relates.>"}}
+Respond with ONLY valid JSON in this exact format (no other text):
+{{"language": "<the original language of the article, as a full language name, e.g. English, Amharic, Arabic>", "title": "<a clean, compelling headline in English>", "topic": "<one of: Politics / Business / Health / Technology / Crime / Environment / Conflict / Humanitarian / Education>", "sentiment": "<Positive / Negative / Neutral>", "brief": "<3 to 4 sentences in clear English. Summarize the key facts: what happened, who is involved, where, and why it matters. Write like a professional journalist for a wide public audience.>"}}
 
-Article title: {title[:300]}
-Article text: {text[:1500]}"""
+Story title: {title[:300]}
+Story content: {text[:1500]}"""
 
 def extract_json(raw):
     text = raw.strip().strip("`").strip()
