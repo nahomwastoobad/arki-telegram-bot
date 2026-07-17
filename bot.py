@@ -6,6 +6,7 @@ import requests
 import clickhouse_connect
 import logging
 from datetime import datetime, date
+from urllib.parse import urlparse
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger("TelegramBot")
@@ -212,6 +213,41 @@ def mark_posted(url, title, client):
 def sanitize(text):
     if not text: return ""
     return text.encode("utf-8", errors="ignore").decode("utf-8").strip()
+
+def fetch_article_image(article_url):
+    """Scrape the first usable image from an article URL using og:image / twitter:image meta tags."""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; ArkinewsBot/1.0; +https://x.com/ArkinewsET)",
+            "Accept": "text/html,application/xhtml+xml",
+        }
+        resp = requests.get(article_url, headers=headers, timeout=6, allow_redirects=True)
+        if resp.status_code != 200:
+            return None
+        html = resp.text[:50000]  # only parse first 50KB
+
+        # 1. Try og:image
+        m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if not m:
+            m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', html, re.IGNORECASE)
+
+        # 2. Try twitter:image
+        if not m:
+            m = re.search(r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if not m:
+            m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']', html, re.IGNORECASE)
+
+        if m:
+            img = m.group(1).strip()
+            if img.startswith("http"):
+                logger.info(f"[Image] Found: {img[:80]}")
+                return img
+
+        logger.info("[Image] No og:image or twitter:image found, skipping image.")
+        return None
+    except Exception as e:
+        logger.warning(f"[Image] fetch failed: {e}")
+        return None
 
 def map_gdelt_topic(themes):
     if not themes: return "Politics"
@@ -461,7 +497,7 @@ def fetch_and_post():
     topic    = analysis.get("topic", article.get("raw_topic", "Politics"))
     brief    = analysis.get("brief", "")
     provider = analysis.get("_provider", "LLM")
-    image_url = article.get("image_url") or "https://images.unsplash.com/photo-1547496614-2c35848bb017?q=80&w=1000&auto=format&fit=crop"
+    image_url = article.get("image_url") or fetch_article_image(url)
 
     if not brief:
         mark_posted(url, title_en, client)
@@ -470,7 +506,6 @@ def fetch_and_post():
 
     # Extract source domain for display
     try:
-        from urllib.parse import urlparse
         source_domain = urlparse(url).netloc.replace("www.", "")
     except Exception:
         source_domain = url
