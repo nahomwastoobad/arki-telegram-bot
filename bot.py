@@ -5,6 +5,7 @@ import time
 import requests
 import clickhouse_connect
 import logging
+from datetime import datetime, date
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger("TelegramBot")
@@ -58,16 +59,35 @@ def ensure_tables(client):
         ) ENGINE = MergeTree() ORDER BY posted_at
     """)
 
+def to_timestamp(d):
+    if not d:
+        return 0
+    if isinstance(d, datetime):
+        return d.timestamp()
+    if isinstance(d, date):
+        return datetime.combine(d, datetime.min.time()).timestamp()
+    if isinstance(d, str):
+        try:
+            return datetime.strptime(d, "%Y-%m-%d %H:%M:%S").timestamp()
+        except ValueError:
+            try:
+                return datetime.strptime(d, "%Y-%m-%d").timestamp()
+            except ValueError:
+                return 0
+    return 0
+
 def pick_next_article(client):
     """
-    Pick exactly 1 un-posted article. Priority: Events -> GKG News -> Scraper.
+    Pick exactly 1 un-posted article. Priority is determined by date (newest overall).
     """
     is_tinybird = "tinybird" in CH_HOST.lower()
     posted_urls = get_posted_urls() if is_tinybird else set()
 
+    candidates = []
+
     # 1. GDELT Events (Geopolitical Events)
     try:
-        limit = 50 if is_tinybird else 1
+        limit = 50 if is_tinybird else 10
         where_clause = "" if is_tinybird else """
             WHERE source_url NOT IN (
                   SELECT url FROM telegram_posted_v2
@@ -77,7 +97,7 @@ def pick_next_article(client):
               AND source_url != ''
         """
         rows = client.query(f"""
-            SELECT event_label, actor1_name, actor2_name, location_name, source_url, avg_tone, event_type
+            SELECT event_label, actor1_name, actor2_name, location_name, source_url, avg_tone, event_type, ingested_at
             FROM gdelt_events
             {where_clause}
             ORDER BY ingested_at DESC
@@ -89,20 +109,21 @@ def pick_next_article(client):
             if is_tinybird and url in posted_urls:
                 continue
             title = f"Geopolitical Event: {r[0]} ({r[1]} & {r[2]}) in {r[3]}"
-            return {
+            candidates.append({
                 "source": "gdelt_event",
                 "title": title, "url": url,
                 "raw_topic": r[6] or "Conflict",
                 "sentiment_score": float(r[5] or 0) / 10.0,
                 "text": f"Event Label: {r[0]}, Actor 1: {r[1]}, Actor 2: {r[2]}, Location: {r[3]}, Source: {url}",
-                "image_url": None
-            }
+                "image_url": None,
+                "date": r[7]
+            })
     except Exception as e:
         logger.warning(f"GDELT Events pick failed: {e}")
 
     # 2. GDELT GKG News
     try:
-        limit = 50 if is_tinybird else 1
+        limit = 50 if is_tinybird else 10
         where_clause = "WHERE (locations LIKE '%ET%' OR themes LIKE '%ETHIOPIA%')"
         if not is_tinybird:
             where_clause += """
@@ -113,7 +134,7 @@ def pick_next_article(client):
               )
             """
         rows = client.query(f"""
-            SELECT title, source_url, themes, avg_tone, language, image_url
+            SELECT title, source_url, themes, avg_tone, language, image_url, fetch_date
             FROM gdelt_gkg
             {where_clause}
             ORDER BY fetch_date DESC
@@ -124,20 +145,21 @@ def pick_next_article(client):
             url = r[1]
             if is_tinybird and url in posted_urls:
                 continue
-            return {
+            candidates.append({
                 "source": "gdelt",
                 "title": r[0], "url": url,
                 "raw_topic": map_gdelt_topic(r[2]),
                 "sentiment_score": float(r[3] or 0) / 10.0,
                 "text": r[0],
-                "image_url": r[5] if len(r) > 5 else None
-            }
+                "image_url": r[5] if len(r) > 5 else None,
+                "date": r[6]
+            })
     except Exception as e:
         logger.warning(f"GDELT GKG pick failed: {e}")
 
     # 3. Fallback: Scraper + Sentiment pipeline
     try:
-        limit = 50 if is_tinybird else 1
+        limit = 50 if is_tinybird else 10
         where_clause = "" if is_tinybird else """
             WHERE sr.url NOT IN (
                 SELECT url FROM telegram_posted_v2
@@ -146,7 +168,7 @@ def pick_next_article(client):
             )
         """
         rows = client.query(f"""
-            SELECT sr.title, sr.url, nt.topic, sr.sentiment_score_normalized, nt.translated_text
+            SELECT sr.title, sr.url, nt.topic, sr.sentiment_score_normalized, nt.translated_text, nt.processed_at
             FROM sentiment_results sr
             JOIN news_topics nt ON sr.doc_id = nt.doc_id
             {where_clause}
@@ -158,18 +180,24 @@ def pick_next_article(client):
             url = r[1]
             if is_tinybird and url in posted_urls:
                 continue
-            return {
+            candidates.append({
                 "source": "scraper",
                 "title": r[0], "url": url,
                 "raw_topic": r[2] or "Politics",
                 "sentiment_score": float(r[3] or 0),
                 "text": r[4] or r[0],
-                "image_url": None
-            }
+                "image_url": None,
+                "date": r[5]
+            })
     except Exception as e:
         logger.warning(f"Scraper pick failed: {e}")
 
-    return None
+    if not candidates:
+        return None
+
+    # Sort candidates by date descending (newest overall first)
+    candidates.sort(key=lambda x: to_timestamp(x["date"]), reverse=True)
+    return candidates[0]
 
 def mark_posted(url, title, client):
     if "tinybird" in CH_HOST.lower():
