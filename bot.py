@@ -34,7 +34,22 @@ def get_db_client():
         secure=True
     )
 
+POSTED_FILE = "posted_urls.txt"
+
+def get_posted_urls():
+    if os.path.exists(POSTED_FILE):
+        with open(POSTED_FILE, "r") as f:
+            return set(line.strip() for line in f if line.strip())
+    return set()
+
+def save_posted_url(url):
+    with open(POSTED_FILE, "a") as f:
+        f.write(f"{url}\n")
+
 def ensure_tables(client):
+    if "tinybird" in CH_HOST.lower():
+        # Tinybird does not support DDL (CREATE TABLE) via SQL driver
+        return
     client.command("""
         CREATE TABLE IF NOT EXISTS telegram_posted_v2 (
             url String,
@@ -47,29 +62,39 @@ def pick_next_article(client):
     """
     Pick exactly 1 un-posted article. Priority: Events -> GKG News -> Scraper.
     """
+    is_tinybird = "tinybird" in CH_HOST.lower()
+    posted_urls = get_posted_urls() if is_tinybird else set()
+
     # 1. GDELT Events (Geopolitical Events)
     try:
-        rows = client.query("""
-            SELECT event_label, actor1_name, actor2_name, location_name, source_url, avg_tone, event_type
-            FROM gdelt_events
+        limit = 50 if is_tinybird else 1
+        where_clause = "" if is_tinybird else """
             WHERE source_url NOT IN (
                   SELECT url FROM telegram_posted_v2
                   UNION ALL
                   SELECT url FROM telegram_posted_urls
               )
               AND source_url != ''
+        """
+        rows = client.query(f"""
+            SELECT event_label, actor1_name, actor2_name, location_name, source_url, avg_tone, event_type
+            FROM gdelt_events
+            {where_clause}
             ORDER BY ingested_at DESC
-            LIMIT 1
+            LIMIT {limit}
         """).result_rows
-        if rows:
-            r = rows[0]
+        
+        for r in rows:
+            url = r[4]
+            if is_tinybird and url in posted_urls:
+                continue
             title = f"Geopolitical Event: {r[0]} ({r[1]} & {r[2]}) in {r[3]}"
             return {
                 "source": "gdelt_event",
-                "title": title, "url": r[4],
+                "title": title, "url": url,
                 "raw_topic": r[6] or "Conflict",
                 "sentiment_score": float(r[5] or 0) / 10.0,
-                "text": f"Event Label: {r[0]}, Actor 1: {r[1]}, Actor 2: {r[2]}, Location: {r[3]}, Source: {r[4]}",
+                "text": f"Event Label: {r[0]}, Actor 1: {r[1]}, Actor 2: {r[2]}, Location: {r[3]}, Source: {url}",
                 "image_url": None
             }
     except Exception as e:
@@ -77,23 +102,31 @@ def pick_next_article(client):
 
     # 2. GDELT GKG News
     try:
-        rows = client.query("""
-            SELECT title, source_url, themes, avg_tone, language, image_url
-            FROM gdelt_gkg
-            WHERE (locations LIKE '%ET%' OR themes LIKE '%ETHIOPIA%')
+        limit = 50 if is_tinybird else 1
+        where_clause = "WHERE (locations LIKE '%ET%' OR themes LIKE '%ETHIOPIA%')"
+        if not is_tinybird:
+            where_clause += """
               AND source_url NOT IN (
                   SELECT url FROM telegram_posted_v2
                   UNION ALL
                   SELECT url FROM telegram_posted_urls
               )
+            """
+        rows = client.query(f"""
+            SELECT title, source_url, themes, avg_tone, language, image_url
+            FROM gdelt_gkg
+            {where_clause}
             ORDER BY fetch_date DESC
-            LIMIT 1
+            LIMIT {limit}
         """).result_rows
-        if rows:
-            r = rows[0]
+        
+        for r in rows:
+            url = r[1]
+            if is_tinybird and url in posted_urls:
+                continue
             return {
                 "source": "gdelt",
-                "title": r[0], "url": r[1],
+                "title": r[0], "url": url,
                 "raw_topic": map_gdelt_topic(r[2]),
                 "sentiment_score": float(r[3] or 0) / 10.0,
                 "text": r[0],
@@ -104,23 +137,30 @@ def pick_next_article(client):
 
     # 3. Fallback: Scraper + Sentiment pipeline
     try:
-        rows = client.query("""
-            SELECT sr.title, sr.url, nt.topic, sr.sentiment_score_normalized, nt.translated_text
-            FROM sentiment_results sr
-            JOIN news_topics nt ON sr.doc_id = nt.doc_id
+        limit = 50 if is_tinybird else 1
+        where_clause = "" if is_tinybird else """
             WHERE sr.url NOT IN (
                 SELECT url FROM telegram_posted_v2
                 UNION ALL
                 SELECT url FROM telegram_posted_urls
             )
+        """
+        rows = client.query(f"""
+            SELECT sr.title, sr.url, nt.topic, sr.sentiment_score_normalized, nt.translated_text
+            FROM sentiment_results sr
+            JOIN news_topics nt ON sr.doc_id = nt.doc_id
+            {where_clause}
             ORDER BY nt.processed_at DESC
-            LIMIT 1
+            LIMIT {limit}
         """).result_rows
-        if rows:
-            r = rows[0]
+        
+        for r in rows:
+            url = r[1]
+            if is_tinybird and url in posted_urls:
+                continue
             return {
                 "source": "scraper",
-                "title": r[0], "url": r[1],
+                "title": r[0], "url": url,
                 "raw_topic": r[2] or "Politics",
                 "sentiment_score": float(r[3] or 0),
                 "text": r[4] or r[0],
@@ -132,9 +172,12 @@ def pick_next_article(client):
     return None
 
 def mark_posted(url, title, client):
-    safe_url   = url.replace("'", "''")
-    safe_title = (title or "").replace("'", "''")
-    client.command(f"INSERT INTO telegram_posted_v2 (url, title) VALUES ('{safe_url}', '{safe_title}')")
+    if "tinybird" in CH_HOST.lower():
+        save_posted_url(url)
+    else:
+        safe_url   = url.replace("'", "''")
+        safe_title = (title or "").replace("'", "''")
+        client.command(f"INSERT INTO telegram_posted_v2 (url, title) VALUES ('{safe_url}', '{safe_title}')")
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 
