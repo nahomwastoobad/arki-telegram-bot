@@ -330,31 +330,46 @@ def summarize(title, text):
 
 def send_telegram(message, url, image_url=None):
     base_urls = [TELEGRAM_API_URL.rstrip('/'), "https://api.telegram.org"]
-    # Deduplicate in case TELEGRAM_API_URL is already api.telegram.org
     seen = set()
     base_urls = [b for b in base_urls if not (b in seen or seen.add(b))]
 
-    keyboard = {"inline_keyboard": [[{"text": "Read Full Article", "url": url}]]}
+    keyboard = {"inline_keyboard": [[{"text": "🔗 Read Full Article", "url": url}]]}
     last_error = ""
 
     for base in base_urls:
         try:
+            # Always try sendPhoto first if we have an image
             if image_url and str(image_url).startswith("http"):
                 try:
-                    resp = requests.post(f"{base}/bot{TELEGRAM_BOT_TOKEN}/sendPhoto", json={
-                        "chat_id": TELEGRAM_CHANNEL_ID, "photo": image_url,
-                        "caption": message, "parse_mode": "HTML", "reply_markup": keyboard
-                    }, timeout=10)
+                    resp = requests.post(
+                        f"{base}/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
+                        json={
+                            "chat_id": TELEGRAM_CHANNEL_ID,
+                            "photo": image_url,
+                            "caption": message,
+                            "parse_mode": "HTML",
+                            "reply_markup": keyboard
+                        },
+                        timeout=12
+                    )
                     if resp.status_code == 200:
                         return 200, resp.text
                     logger.warning(f"[{base}] sendPhoto {resp.status_code}, falling back to sendMessage")
                 except Exception as pe:
-                    logger.warning(f"[{base}] sendPhoto timed out: {pe}, falling back to sendMessage")
+                    logger.warning(f"[{base}] sendPhoto failed: {pe}, falling back to sendMessage")
 
-            resp = requests.post(f"{base}/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={
-                "chat_id": TELEGRAM_CHANNEL_ID, "text": message,
-                "parse_mode": "HTML", "reply_markup": keyboard
-            }, timeout=15)
+            # Fallback: text-only
+            resp = requests.post(
+                f"{base}/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": TELEGRAM_CHANNEL_ID,
+                    "text": message,
+                    "parse_mode": "HTML",
+                    "reply_markup": keyboard,
+                    "disable_web_page_preview": False
+                },
+                timeout=15
+            )
             if resp.status_code == 200:
                 return 200, resp.text
 
@@ -422,14 +437,23 @@ def fetch_and_post():
         logger.warning("Empty brief — skipping.")
         return
 
-    t_emoji = TOPIC_EMOJI.get(topic, "📰")
+    # Extract source domain for display
+    try:
+        from urllib.parse import urlparse
+        source_domain = urlparse(url).netloc.replace("www.", "")
+    except Exception:
+        source_domain = url
+
     s_emoji = SENTIMENT_EMOJI.get(sentiment_label, "🟡")
 
+    # Format matches original style: title, metadata fields, Brief label, Source
     message = (
-        f"{t_emoji} <b>{title_en}</b>\n\n"
-        f"{brief}\n\n"
-        f"<b>Topic:</b> {topic} | <b>Sentiment:</b> {s_emoji} {sentiment_label}\n"
-        f"<b>Language:</b> {lang} | <i>via {provider}</i>\n\n"
+        f"<b>{title_en}</b>\n\n"
+        f"Language: {lang}\n"
+        f"Sentiment: {sentiment_label}\n"
+        f"Topic: {topic}\n\n"
+        f"Brief:\n{brief}\n\n"
+        f"Source: {source_domain}\n\n"
         f"🇪🇹 <b>Ethiopia 360° Intelligence Platform</b>"
     )
 
