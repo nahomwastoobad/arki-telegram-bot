@@ -24,9 +24,11 @@ TELEGRAM_API_URL    = os.environ.get("TELEGRAM_API_URL", "https://api.telegram.o
 # ── DB ────────────────────────────────────────────────────────────────────────
 
 def get_db_client():
+    # Tinybird uses port 443, standard ClickHouse uses 8443
+    port = 443 if "tinybird" in CH_HOST.lower() else 8443
     return clickhouse_connect.get_client(
         host=CH_HOST,
-        port=8443,
+        port=port,
         username=CH_USER,
         password=CH_PASSWORD,
         secure=True
