@@ -454,10 +454,10 @@ def fetch_and_post():
         f"Topic: {topic}\n\n"
         f"Brief:\n{brief}\n\n"
         f"Source: {source_domain}\n\n"
-        f"📡 <b>Arki-news</b>\n"
-        f"🔔 Be notified first: https://lnkd.in/eX74MsBC\n"
-        f"🐦 Follow on X: https://x.com/ArkinewsET\n"
-        f"💬 Telegram: @farkinews"
+        f"<b>Arki-news</b>\n"
+        f"Be notified first: https://lnkd.in/eX74MsBC\n"
+        f"Follow on X: https://x.com/ArkinewsET\n"
+        f"Telegram: @arkinews"
     )
 
     status, resp_text = send_telegram(message, url, image_url)

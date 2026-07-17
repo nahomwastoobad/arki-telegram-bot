@@ -2,14 +2,16 @@ name: Post Ethiopia News to Telegram
 
 on:
   schedule:
-    # Runs every 5 minutes (GitHub's minimum interval)
     - cron: '*/5 * * * *'
-  workflow_dispatch:  # Allows manual trigger from GitHub UI
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   post-news:
     runs-on: ubuntu-latest
-    timeout-minutes: 4  # Kill if it hangs (prevents overlapping runs)
+    timeout-minutes: 4
 
     steps:
       - name: Checkout code
@@ -37,3 +39,12 @@ jobs:
           CLICKHOUSE_USER:     ${{ secrets.CLICKHOUSE_USER }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
         run: python bot.py
+
+      - name: Save posted URLs to repo
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add posted_urls.txt 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "chore: update posted_urls [skip ci]"
+          git push || true
