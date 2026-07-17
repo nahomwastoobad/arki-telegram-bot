@@ -269,14 +269,16 @@ SYSTEM_MSG = (
     "You always respond with raw valid JSON only — no markdown, no backticks, no explanation outside the JSON. "
     "Write every summary as if you are publishing it directly to a news channel. "
     "If the input is incomplete, fragmented, or unusual, treat it as a wire report and write the best possible summary from what is available — never say the content is unclear or incomplete. "
-    "Summarize the full story objectively. Do not artificially focus only on Ethiopia unless it is the main subject of the article."
+    "Summarize the full story objectively. "
+    "Important: if Ethiopia is mentioned anywhere in the article — even briefly or in passing — make sure that reference appears naturally in your summary. "
+    "Do not invent an Ethiopia connection that does not exist, but never omit one that does."
 )
 
 def build_prompt(title, text):
     return f"""You are publishing a news brief for thousands of readers. Summarize the following story.
 
 Respond with ONLY valid JSON in this exact format (no other text):
-{{"language": "<the original language of the article, as a full language name, e.g. English, Amharic, Arabic>", "title": "<a clean, compelling headline in English>", "topic": "<one of: Politics / Business / Health / Technology / Crime / Environment / Conflict / Humanitarian / Education>", "sentiment": "<Positive / Negative / Neutral>", "brief": "<3 to 4 sentences in clear English. Summarize the key facts: what happened, who is involved, where, and why it matters. Write like a professional journalist for a wide public audience.>"}}
+{{"language": "<the original language of the article, as a full language name, e.g. English, Amharic, Arabic>", "title": "<a clean, compelling headline in English>", "topic": "<one of: Politics / Business / Health / Technology / Crime / Environment / Conflict / Humanitarian / Education>", "sentiment": "<Positive / Negative / Neutral>", "brief": "<3 to 4 sentences in clear English. Summarize the key facts: what happened, who is involved, where, and why it matters. If Ethiopia is mentioned in the story, include that reference naturally in the summary. Write like a professional journalist for a wide public audience.>"}}
 
 Story title: {title[:300]}
 Story content: {text[:1500]}"""
